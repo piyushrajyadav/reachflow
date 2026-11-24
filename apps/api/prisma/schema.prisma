@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EmailStatus {
+  SCHEDULED
+  QUEUED
+  PROCESSING
+  RETRYING
+  RATE_LIMITED
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  PROCESSING
+  COMPLETED
+  PARTIALLY_FAILED
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id           String        @id @default(uuid())
+  googleId     String        @unique
+  name         String
+  email        String        @unique
+  avatar       String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  campaigns    Campaign[]
+  senders      Sender[]
+  slackAccount SlackAccount?
+}
+
+model Sender {
+  id           String   @id @default(uuid())
+  userId       String
+  email        String
+  displayName  String?
+  smtpHost     String
+  smtpPort     Int      @default(587)
+  smtpUser     String
+  smtpPassword String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails       Email[]
+
+  @@unique([userId, email])
+  @@index([userId, isActive])
+}
+
+model Campaign {
+  id          String         @id @default(uuid())
+  userId      String
+  name        String
+  subject     String
+  body        String         @db.Text
+  status      CampaignStatus @default(DRAFT)
+  startAt     DateTime
+  delayMs     Int            @default(2000)
+  hourlyLimit Int            @default(200)
+  totalEmails Int            @default(0)
+  sentCount   Int            @default(0)
+  failedCount Int            @default(0)
+  requestKey  String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails      Email[]
+
+  @@unique([userId, requestKey])
+  @@index([userId, createdAt])
+  @@index([status, startAt])
+}
+
+model Email {
+  id             String      @id @default(uuid())
+  campaignId     String
+  senderId       String
+  recipient      String
+  subject        String
+  body           String      @db.Text
+  status         EmailStatus @default(SCHEDULED)
+  scheduledAt    DateTime
+  sentAt         DateTime?
+  failedAt       DateTime?
+  errorMessage   String?     @db.Text
+  attemptCount   Int         @default(0)
+  idempotencyKey String      @unique
+  providerId     String?
+  previewUrl     String?
+  enqueuedAt     DateTime?
+  processingAt   DateTime?
+  deferredCount  Int         @default(0)
+  searchDirty    Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  campaign       Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  sender         Sender      @relation(fields: [senderId], references: [id])
+
+  @@index([status, scheduledAt])
+  @@index([campaignId, status])
+  @@index([senderId, scheduledAt])
+  @@index([recipient])
+  @@index([searchDirty])
+}
+
+model SlackAccount {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  teamId      String?
+  teamName    String?
+  accessToken String
+  webhookUrl  String?
+  slackUserId String?
+  botUserId   String?
+  channelId   String?
+  channelName String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RateLimitEvent {
+  id          String    @id @default(uuid())
+  userId      String?
+  senderId    String
+  scope       String    @default("sender")
+  windowStart DateTime
+  limit       Int
+  hitAt       DateTime  @default(now())
+  notifiedAt  DateTime?
+
+  @@unique([senderId, scope, windowStart])
+  @@index([userId, hitAt])
+}
